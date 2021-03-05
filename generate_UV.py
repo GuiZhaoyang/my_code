@@ -1,7 +1,6 @@
 import pdb
 import torch
 from utils import TrainOptions
-from utils.imutils import save_uv_map, save_Img
 from torch.utils.data import DataLoader
 from models.uv_generator import Index_UV_Generator
 from datasets.base_dataset import BaseDataset
@@ -87,6 +86,27 @@ def warp_feature(dp_out, feature_map, uv_res):
 
     return warped_feature
 
+def save_uv_map(save_names, save_dir, uv_maps):
+    if uv_maps.shape[3] != 3:
+        uv_maps = uv_maps.permute(0, 2, 3, 1)
+    save_uv_maps = uv_maps.cpu().numpy()
+    for i in range(save_uv_maps.shape[0]):
+        save_name = os.path.join(save_dir, save_names[i].split('/')[-1])
+        cv2.imwrite(save_name, save_uv_maps[i] * 255)
+
+def save_Img(save_names, save_dir, saved_img):
+    # saved_img = saved_img * torch.tensor([0.229, 0.224, 0.225], device=saved_img.device).reshape(1,3,1,1)
+    # saved_img = saved_img + torch.tensor([0.485, 0.456, 0.406], device=saved_img.device).reshape(1,3,1,1)
+    saved_img = saved_img.permute(0, 2, 3, 1)
+
+    saved_img = saved_img.cpu().numpy()
+    # print(save_uv_map.shape)
+    for i in range(saved_img.shape[0]):
+        # save_uv_map = np.zeros((save_uv_maps.shape[1], save_uv_maps.shape[2], 3))
+        # save_uv_map[:, :, :2] = save_uv_maps[i]
+        save_name = os.path.join(save_dir, save_names[i].split('/')[-1])
+        cv2.imwrite(save_name, saved_img[i, :, :, ::-1] * 255)
+
 def trans_img2UV(options, dataset='3doh'):
     dataset = BaseDataset(options, dataset, use_augmentation=False, is_train=False, use_IUV=True)
     dataloader = DataLoader(dataset, batch_size=2, shuffle=False)
@@ -104,6 +124,7 @@ def trans_img2UV(options, dataset='3doh'):
     trans_uv, trans_img = warped_feature[:, :3], warped_feature[:, 3:]
     save_uv_map(item['imgname'], 'examples/BF_UV', trans_uv)
     save_Img(item['imgname'], 'examples/BF_Img', trans_img)
+
 
 if __name__ == '__main__':
     options = TrainOptions().parse_args()
