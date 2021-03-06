@@ -1,18 +1,51 @@
 import pdb
 import torch
 from utils import TrainOptions
+# from utils.imutils import save_uv_map, save_Img
 from torch.utils.data import DataLoader
 from models.uv_generator import Index_UV_Generator
 from datasets.base_dataset import BaseDataset
+import cv2
+import os
+import matplotlib.pyplot as plt
+
+
+def save_uv_map(save_names, save_dir, uv_maps):
+    if uv_maps.shape[3] != 3:
+
+        uv_maps = uv_maps.permute(0, 2, 3, 1)
+
+    save_uv_maps = uv_maps.cpu().numpy()
+
+    for i in range(save_uv_maps.shape[0]):
+        save_name = os.path.join(save_dir, save_names[i].split('/')[-1])
+        if not os.path.exists(save_dir):
+            os.mkdir(save_dir)
+        cv2.imwrite(save_name, save_uv_maps[i] * 255)
+
+
+def save_Img(save_names, save_dir, saved_img):
+    # if we use img_orig, then we do NOT need to do de normalize.
+    # saved_img = saved_img * torch.tensor([0.229, 0.224, 0.225], device=saved_img.device).reshape(1, 3, 1, 1)
+    # saved_img = saved_img + torch.tensor([0.485, 0.456, 0.406], device=saved_img.device).reshape(1, 3, 1, 1)
+
+    saved_img = saved_img.permute(0, 2, 3, 1)
+
+    saved_img = saved_img.cpu().numpy()
+
+    for i in range(saved_img.shape[0]):
+        save_name = os.path.join(save_dir, save_names[i].split('/')[-1])
+        if not os.path.exists(save_dir):
+            os.mkdir(save_dir)
+        cv2.imwrite(save_name, saved_img[i, :, :, ::-1] * 255)
+
 
 def warp_feature(dp_out, feature_map, uv_res):
     """
     C: channel number of the input feature map;  H: height;  W: width
-
     :param dp_out: IUV image in shape (batch_size, 3, H, W)
     :param feature_map: Local feature map in shape (batch_size, C, H, W)
     :param uv_res: The resolution of the transferred feature map in UV space.
-
     :return: warped_feature: Feature map in UV space with shape (batch_size, C+3, uv_res, uv_res)
     The x, y cordinates in the image sapce and mask will be added as the last 3 channels
      of the warped feature, so the channel number of warped feature is C+3.
@@ -86,32 +119,16 @@ def warp_feature(dp_out, feature_map, uv_res):
 
     return warped_feature
 
-def save_uv_map(save_names, save_dir, uv_maps):
-    if uv_maps.shape[3] != 3:
-        uv_maps = uv_maps.permute(0, 2, 3, 1)
-    save_uv_maps = uv_maps.cpu().numpy()
-    for i in range(save_uv_maps.shape[0]):
-        save_name = os.path.join(save_dir, save_names[i].split('/')[-1])
-        cv2.imwrite(save_name, save_uv_maps[i] * 255)
-
-def save_Img(save_names, save_dir, saved_img):
-    # saved_img = saved_img * torch.tensor([0.229, 0.224, 0.225], device=saved_img.device).reshape(1,3,1,1)
-    # saved_img = saved_img + torch.tensor([0.485, 0.456, 0.406], device=saved_img.device).reshape(1,3,1,1)
-    saved_img = saved_img.permute(0, 2, 3, 1)
-
-    saved_img = saved_img.cpu().numpy()
-    # print(save_uv_map.shape)
-    for i in range(saved_img.shape[0]):
-        # save_uv_map = np.zeros((save_uv_maps.shape[1], save_uv_maps.shape[2], 3))
-        # save_uv_map[:, :, :2] = save_uv_maps[i]
-        save_name = os.path.join(save_dir, save_names[i].split('/')[-1])
-        cv2.imwrite(save_name, saved_img[i, :, :, ::-1] * 255)
 
 def trans_img2UV(options, dataset='3doh'):
-    dataset = BaseDataset(options, dataset, use_augmentation=False, is_train=False, use_IUV=True)
+    # dataset = BaseDataset(options, dataset, use_augmentation=False, is_train=False, use_IUV=True)
+    options.use_augmentation = False
+    dataset = BaseDataset(options, dataset, use_augmentation=False, is_train=True, use_IUV=True)
+
     dataloader = DataLoader(dataset, batch_size=2, shuffle=False)
     item = next(iter(dataloader))
     img, iuv = item['img_orig'], item['gt_iuv']
+
     dtype = iuv.dtype
     # print(iuv.shape)
     gt_mask_shape = (iuv[:, 0].unsqueeze(1) > 0).type(dtype)
@@ -120,12 +137,29 @@ def trans_img2UV(options, dataset='3doh'):
 
     dp_out = torch.cat((gt_mask_shape, gt_uv_shape), 1)
     batch_size = img.shape[0]
-    warped_feature = warp_feature(dp_out, img, img.shape[2])
-    trans_uv, trans_img = warped_feature[:, :3], warped_feature[:, 3:]
+    # warped_feature = warp_feature(dp_out, img, img.shape[2])
+    # use low UV resolution is better for visulization
+    warped_feature = warp_feature(dp_out, img, img.shape[2] // 2)
+    
+    # first 3 channels are transferred pixels
+    trans_img, trans_uv = warped_feature[:, :3], warped_feature[:, 3:]
     save_uv_map(item['imgname'], 'examples/BF_UV', trans_uv)
     save_Img(item['imgname'], 'examples/BF_Img', trans_img)
+    
+    # visualize
+    plt.subplot(1, 3, 1)
+    plt.imshow(img[0].permute(1, 2, 0))
+    plt.subplot(1, 3, 2)
+    plt.imshow(iuv[0].permute(1, 2, 0))
+    plt.subplot(1, 3, 3)
+    plt.imshow(trans_img[0].permute(1, 2, 0))
+    plt.savefig('examples/warp_example.png')
 
 
 if __name__ == '__main__':
     options = TrainOptions().parse_args()
-    trans_img2UV(options, dataset='3doh')
+    # trans_img2UV(options, dataset='3doh')
+    
+    # I do not have the data of 3doh, so I use up-3d train set.
+    trans_img2UV(options, dataset='up-3d')
+
